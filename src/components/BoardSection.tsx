@@ -14,6 +14,7 @@ import {
   Camera
 } from 'lucide-react';
 import { BOARD_BANNER } from '../data/initialData';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface BoardSectionProps {
   boardCaptures: BoardCapture[];
@@ -52,14 +53,14 @@ export const BoardSection: React.FC<BoardSectionProps> = ({
       if (!title) {
         setTitle(file.name.replace(/\.[^/.]+$/, ''));
       }
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setImageUrl(event.target.result as string);
+      compressImageFile(file)
+        .then((compressed) => {
+          setImageUrl(compressed);
           sound.playSuccess();
-        }
-      };
-      reader.readAsDataURL(file);
+        })
+        .catch((err) => {
+          console.error('Image compression error:', err);
+        });
     }
   };
 

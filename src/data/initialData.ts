@@ -1,8 +1,9 @@
 import { AppStateData } from '../types';
+import HERO_BANNER from '../assets/images/physics_hero_banner_1792797465515.jpg';
+import BOARD_BANNER from '../assets/images/physics_blackboard_hero_1792797466942.jpg';
+import ENGINEER_BANNER from '../assets/images/physics_engineer_hero_1792797466449.jpg';
 
-export const HERO_BANNER = '/src/assets/images/physics_hero_banner_1792797465515.jpg';
-export const BOARD_BANNER = '/src/assets/images/physics_blackboard_hero_1792797466942.jpg';
-export const ENGINEER_BANNER = '/src/assets/images/physics_engineer_hero_1792797466449.jpg';
+export { HERO_BANNER, BOARD_BANNER, ENGINEER_BANNER };
 
 export const initialData: AppStateData = {
   exams: [
@@ -514,11 +515,13 @@ export const initialData: AppStateData = {
     }
   ],
 
+  students: [],
+  engineerSubmissions: [],
   complaints: []
 };
 
 // Local storage synchronization helper
-const STORAGE_KEY = 'physics_fedaieen_data_v1';
+const STORAGE_KEY = 'physics_fedaieen_data_v2';
 
 export function getStoredData(): AppStateData {
   try {
@@ -527,11 +530,13 @@ export function getStoredData(): AppStateData {
       const parsed = JSON.parse(raw);
       // Ensure all arrays exist
       return {
+        students: parsed.students || [],
         exams: parsed.exams || initialData.exams,
         submissions: parsed.submissions || initialData.submissions,
         homeworks: parsed.homeworks || initialData.homeworks,
         pdfs: parsed.pdfs || initialData.pdfs,
         engineerProblems: parsed.engineerProblems || initialData.engineerProblems,
+        engineerSubmissions: parsed.engineerSubmissions || [],
         boardCaptures: parsed.boardCaptures || initialData.boardCaptures,
         announcements: parsed.announcements || initialData.announcements,
         complaints: parsed.complaints || []

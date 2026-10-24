@@ -17,6 +17,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { BOARD_BANNER } from '../data/initialData';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface HomeworkSectionProps {
   homeworks: Homework[];
@@ -64,14 +65,14 @@ export const HomeworkSection: React.FC<HomeworkSectionProps> = ({
       if (!title) {
         setTitle(file.name.replace(/\.[^/.]+$/, ''));
       }
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setImageUrl(event.target.result as string);
+      compressImageFile(file)
+        .then((compressed) => {
+          setImageUrl(compressed);
           sound.playSuccess();
-        }
-      };
-      reader.readAsDataURL(file);
+        })
+        .catch((err) => {
+          console.error('Homework image compression error:', err);
+        });
     }
   };
 

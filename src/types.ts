@@ -1,9 +1,26 @@
 export type GradeLevel = 'grade1' | 'grade2' | 'grade3';
 
-export interface StudentUser {
+export interface RegisteredStudent {
+  id: string;
   name: string;
+  phone: string;
+  parentPhone: string;
+  grade: GradeLevel;
+  governorate?: string;
+  registeredAt: string;
+  stars: number;
+  completedExamsCount?: number;
+  solvedProblemsCount?: number;
+}
+
+export interface StudentUser {
+  id?: string;
+  name: string;
+  phone?: string;
+  parentPhone?: string;
   grade: GradeLevel;
   role: 'student';
+  stars?: number;
 }
 
 export interface TeacherUser {
@@ -39,6 +56,7 @@ export interface ExamSubmission {
   examId: string;
   examTitle: string;
   studentName: string;
+  studentPhone?: string;
   grade: GradeLevel;
   score: number;
   totalMarks: number;
@@ -68,10 +86,13 @@ export interface PdfDocument {
   title: string;
   chapter: string;
   fileSize: string;
-  downloadUrl: string;
+  downloadUrl: string; // Base64 dataUrl, local blob reference, or url
   previewSnippet: string;
   pagesCount: number;
   createdAt: string;
+  directPdfUrl?: string;
+  studySummary?: string;
+  goldenFormulas?: string[];
 }
 
 export interface EngineerProblem {
@@ -86,6 +107,23 @@ export interface EngineerProblem {
   numericalAnswer: string;
   solutionSteps: string[];
   engineerInsight: string;
+}
+
+export interface EngineerSubmission {
+  id: string;
+  problemId: string;
+  problemTitle: string;
+  studentName: string;
+  studentPhone?: string;
+  grade: GradeLevel;
+  numericalAnswer: string;
+  writtenSteps: string;
+  stepsImageUrl?: string;
+  status: 'pending' | 'graded';
+  starsAwarded: number;
+  teacherFeedback?: string;
+  submittedAt: string;
+  gradedAt?: string;
 }
 
 export interface BoardCapture {
@@ -117,11 +155,13 @@ export interface Complaint {
 }
 
 export interface AppStateData {
+  students: RegisteredStudent[];
   exams: Exam[];
   submissions: ExamSubmission[];
   homeworks: Homework[];
   pdfs: PdfDocument[];
   engineerProblems: EngineerProblem[];
+  engineerSubmissions: EngineerSubmission[];
   boardCaptures: BoardCapture[];
   announcements: Announcement[];
   complaints: Complaint[];

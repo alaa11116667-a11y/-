@@ -8,47 +8,67 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128;
+      return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    // Exams
+    // Registered students directory (Readable by all, writable on registration)
+    match /students/{studentId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(studentId);
+    }
+
+    // Solutions to engineer questions submitted by students and graded by teacher
+    match /engineer_submissions/{submissionId} {
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(submissionId);
+    }
+
+    // Exams (Educational content readable by all students)
     match /exams/{examId} {
-      allow read, write: if isValidId(examId);
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(examId);
     }
 
     // Homework sheets
     match /homeworks/{homeworkId} {
-      allow read, write: if isValidId(homeworkId);
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(homeworkId);
     }
 
     // PDF summaries and formula books
     match /pdfs/{pdfId} {
-      allow read, write: if isValidId(pdfId);
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(pdfId);
     }
 
-    // Engineers problems
+    // Engineers high-level problems
     match /engineer_problems/{problemId} {
-      allow read, write: if isValidId(problemId);
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(problemId);
     }
 
     // Blackboard captures
     match /board_captures/{boardId} {
-      allow read, write: if isValidId(boardId);
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(boardId);
     }
 
     // Course announcements
     match /announcements/{announcementId} {
-      allow read, write: if isValidId(announcementId);
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(announcementId);
     }
 
     // Student Exam Submissions & Teacher Grading
     match /submissions/{submissionId} {
-      allow read, write: if isValidId(submissionId);
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(submissionId);
     }
 
     // Student Complaints & Feedback
     match /complaints/{complaintId} {
-      allow read, write: if isValidId(complaintId);
+      allow get, list: if true;
+      allow create, update, delete: if isValidId(complaintId);
     }
 
     // Connection test document

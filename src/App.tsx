@@ -3,11 +3,13 @@ import {
   CurrentUser,
   GradeLevel,
   AppStateData,
+  RegisteredStudent,
   Exam,
   ExamSubmission,
   Homework,
   PdfDocument,
   EngineerProblem,
+  EngineerSubmission,
   BoardCapture,
   Complaint,
   Announcement
@@ -25,27 +27,26 @@ import { HomeworkSection } from './components/HomeworkSection';
 import { PdfSection } from './components/PdfSection';
 import { EngineersSection } from './components/EngineersSection';
 import { BoardSection } from './components/BoardSection';
+import { RewardsSection } from './components/RewardsSection';
 import { TeacherDashboard } from './components/TeacherDashboard';
 import { DeveloperFooter } from './components/DeveloperFooter';
 import { ComplaintsModal } from './components/ComplaintsModal';
 
 import {
-  Atom,
-  Shield,
-  FileCheck2,
-  Image,
-  FileText,
-  Cpu,
-  Presentation,
   Calculator,
   Volume2,
   VolumeX,
   LogOut,
-  User,
   GraduationCap,
   Sparkles,
-  Layers,
-  Award
+  Award,
+  Star,
+  Trophy,
+  BookOpen,
+  Cpu,
+  FileText,
+  FileCheck2,
+  Image as ImageIcon
 } from 'lucide-react';
 
 import { testFirestoreConnection } from './firebase';
@@ -59,9 +60,41 @@ import {
 
 export default function App() {
   const [showSplash, setShowSplash] = useState<boolean>(true);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [activeGrade, setActiveGrade] = useState<GradeLevel>('grade3');
-  const [activeSection, setActiveSection] = useState<'exams' | 'homework' | 'pdf' | 'engineers' | 'board' | 'teacher'>('exams');
+
+  // Persistent login session from localStorage
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('physics_active_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [activeGrade, setActiveGrade] = useState<GradeLevel>(() => {
+    try {
+      const saved = localStorage.getItem('physics_active_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.role === 'student' && parsed.grade) return parsed.grade;
+      }
+    } catch {}
+    return 'grade3';
+  });
+
+  const [activeSection, setActiveSection] = useState<
+    'exams' | 'homework' | 'pdf' | 'engineers' | 'board' | 'rewards' | 'teacher'
+  >(() => {
+    try {
+      const saved = localStorage.getItem('physics_active_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.role === 'teacher') return 'teacher';
+      }
+    } catch {}
+    return 'exams';
+  });
+
   const [activeExam, setActiveExam] = useState<Exam | null>(null);
 
   // Calculator modal state
@@ -74,7 +107,7 @@ export default function App() {
   // Cloud status state
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(false);
 
-  // Master Platform Data (initialized from local storage, synced with cloud)
+  // Master Platform Data (local cache + real-time Firestore sync)
   const [data, setData] = useState<AppStateData>(() => getStoredData());
 
   // Save to localStorage whenever data changes (local cache)
@@ -84,13 +117,9 @@ export default function App() {
 
   // Real-time Cloud Synchronization with Firebase Firestore
   useEffect(() => {
-    // 1. Verify Firestore connectivity
     testFirestoreConnection();
-
-    // 2. Seed initial physics questions and sheets if cloud is fresh
     seedInitialCloudDataIfNeeded();
 
-    // 3. Real-time listener: any device changes instantly update here
     const unsubscribe = subscribeToCloudData(
       (updater) => {
         setData(updater);
@@ -105,9 +134,21 @@ export default function App() {
     };
   }, []);
 
-  // When student logs in, automatically select their grade
+  // Compute student stars dynamically
+  const currentStudentProfile = currentUser?.role === 'student'
+    ? data.students.find((s) => s.name === currentUser.name)
+    : null;
+
+  const currentStudentStars = currentStudentProfile?.stars ?? (currentUser?.role === 'student' ? (currentUser.stars || 10) : 0);
+
+  // When student or teacher logs in, remember session permanently
   const handleLogin = (user: CurrentUser) => {
     setCurrentUser(user);
+    try {
+      localStorage.setItem('physics_active_session', JSON.stringify(user));
+    } catch (err) {
+      console.error(err);
+    }
     if (user.role === 'student') {
       setActiveGrade(user.grade);
       setActiveSection('exams');
@@ -116,10 +157,23 @@ export default function App() {
     }
   };
 
+  const handleRegisterStudent = (newStudent: RegisteredStudent) => {
+    setData((prev) => ({
+      ...prev,
+      students: [newStudent, ...(prev.students || []).filter((s) => s.id !== newStudent.id)]
+    }));
+    syncItemToCloud(COLLECTIONS.STUDENTS, newStudent);
+  };
+
   const handleLogout = () => {
     sound.playClick();
     setCurrentUser(null);
     setActiveExam(null);
+    try {
+      localStorage.removeItem('physics_active_session');
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleToggleMute = () => {
@@ -127,42 +181,143 @@ export default function App() {
     setIsMuted(next);
   };
 
-  // Grade Name labels (Hidden passcodes)
+  // Grade Name labels
   const gradeLabels: Record<GradeLevel, string> = {
     grade1: 'الصف الأول الثانوي',
     grade2: 'الصف الثاني الثانوي',
     grade3: 'الصف الثالث الثانوي (الثانوية العامة)'
   };
 
-  // ---------------- Handlers for Data Mutations (Teacher/Student with Cloud Sync) ----------------
+  // ---------------- Handlers for Data Mutations (With Cloud Sync) ----------------
 
   const handleFinishExam = (submission: ExamSubmission) => {
     setData((prev) => ({
       ...prev,
-      submissions: [submission, ...prev.submissions]
+      submissions: [submission, ...prev.submissions.filter((s) => s.id !== submission.id)]
     }));
     syncItemToCloud(COLLECTIONS.SUBMISSIONS, submission);
   };
 
   const handleGradeSubmission = (subId: string, finalScore: number, teacherNotes?: string) => {
     const existing = data.submissions.find((s) => s.id === subId);
+    if (!existing) return;
+
     const updatedSub: ExamSubmission = {
-      ...(existing || ({} as ExamSubmission)),
-      id: subId,
+      ...existing,
       score: finalScore,
       isGraded: true,
-      teacherNotes: teacherNotes || 'تم تصحيح واعتماد النتيجة من المستر محمد علاء.',
+      teacherNotes: teacherNotes || 'تم تصحيح واعتماد النتيجة من الباشمهندس محمد علاء.',
       gradedAt: new Date().toLocaleString('ar-EG')
+    };
+
+    // Calculate stars reward: passing exam gives stars
+    const starsEarned = finalScore >= existing.totalMarks * 0.85 ? 25 : 15;
+
+    setData((prev) => {
+      // Award stars to student if in student roster
+      const updatedStudents = prev.students.map((st) => {
+        if (st.name === existing.studentName) {
+          const newStars = (st.stars || 10) + starsEarned;
+          syncItemToCloud(COLLECTIONS.STUDENTS, { ...st, stars: newStars });
+          return { ...st, stars: newStars };
+        }
+        return st;
+      });
+
+      return {
+        ...prev,
+        students: updatedStudents,
+        submissions: prev.submissions.map((s) => (s.id === subId ? updatedSub : s))
+      };
+    });
+
+    syncItemToCloud(COLLECTIONS.SUBMISSIONS, updatedSub);
+  };
+
+  const handleAllowRetakeExam = (subId: string) => {
+    setData((prev) => ({
+      ...prev,
+      submissions: prev.submissions.filter((s) => s.id !== subId)
+    }));
+    deleteItemFromCloud(COLLECTIONS.SUBMISSIONS, subId);
+  };
+
+  const handleSubmitEngineerSolution = (
+    solution: Omit<EngineerSubmission, 'id' | 'submittedAt'>
+  ) => {
+    const newSub: EngineerSubmission = {
+      ...solution,
+      id: `engsub-${Date.now()}`,
+      submittedAt: new Date().toLocaleString('ar-EG')
     };
 
     setData((prev) => ({
       ...prev,
-      submissions: prev.submissions.map((s) =>
-        s.id === subId ? updatedSub : s
-      )
+      engineerSubmissions: [newSub, ...(prev.engineerSubmissions || [])]
+    }));
+    syncItemToCloud(COLLECTIONS.ENGINEER_SUBMISSIONS, newSub);
+  };
+
+  const handleGradeEngineerSubmission = (
+    subId: string,
+    stars: number,
+    feedback: string
+  ) => {
+    const existing = data.engineerSubmissions.find((s) => s.id === subId);
+    if (!existing) return;
+
+    const updatedSub: EngineerSubmission = {
+      ...existing,
+      status: 'graded',
+      starsAwarded: stars,
+      teacherFeedback: feedback,
+      gradedAt: new Date().toLocaleString('ar-EG')
+    };
+
+    setData((prev) => {
+      // Award stars to the student
+      const updatedStudents = prev.students.map((st) => {
+        if (st.name === existing.studentName) {
+          const newStars = (st.stars || 10) + stars;
+          syncItemToCloud(COLLECTIONS.STUDENTS, { ...st, stars: newStars });
+          return { ...st, stars: newStars };
+        }
+        return st;
+      });
+
+      return {
+        ...prev,
+        students: updatedStudents,
+        engineerSubmissions: prev.engineerSubmissions.map((s) => (s.id === subId ? updatedSub : s))
+      };
+    });
+
+    syncItemToCloud(COLLECTIONS.ENGINEER_SUBMISSIONS, updatedSub);
+  };
+
+  const handleAwardBonusStars = (studentId: string, starsToAdd: number) => {
+    const student = data.students.find((s) => s.id === studentId);
+    if (!student) return;
+
+    const updated: RegisteredStudent = {
+      ...student,
+      stars: (student.stars || 10) + starsToAdd
+    };
+
+    setData((prev) => ({
+      ...prev,
+      students: prev.students.map((s) => (s.id === studentId ? updated : s))
     }));
 
-    syncItemToCloud(COLLECTIONS.SUBMISSIONS, updatedSub);
+    syncItemToCloud(COLLECTIONS.STUDENTS, updated);
+  };
+
+  const handleDeleteStudent = (studentId: string) => {
+    setData((prev) => ({
+      ...prev,
+      students: prev.students.filter((s) => s.id !== studentId)
+    }));
+    deleteItemFromCloud(COLLECTIONS.STUDENTS, studentId);
   };
 
   const handleAddExam = (newExam: Exam) => {
@@ -299,17 +454,18 @@ export default function App() {
     syncItemToCloud(COLLECTIONS.COMPLAINTS, newComplaint);
   };
 
-  // 1. Initial 3-second splash screen
+  // 1. Initial splash screen
   if (showSplash) {
     return <SplashScreen onComplete={() => setShowSplash(false)} />;
   }
 
-  // 2. Login Page
+  // 2. Login Page with Registration & One-time Session
   if (!currentUser) {
     return (
       <>
         <LoginPage
           onLogin={handleLogin}
+          onRegisterStudent={handleRegisterStudent}
           onOpenComplaints={() => setIsComplaintsOpen(true)}
         />
         <ComplaintsModal
@@ -327,6 +483,7 @@ export default function App() {
       <ExamEngine
         exam={activeExam}
         studentName={currentUser.role === 'student' ? currentUser.name : 'المهندس محمد علاء (وضع المعاينة)'}
+        studentPhone={currentUser.role === 'student' ? currentUser.phone : undefined}
         onFinishExam={handleFinishExam}
         onExit={() => setActiveExam(null)}
       />
@@ -336,10 +493,10 @@ export default function App() {
   const isTeacher = currentUser.role === 'teacher';
 
   return (
-    <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
-      {/* ================= Top Bar Contract (3 zones) ================= */}
-      <header className="sticky top-0 z-40 bg-slate-900/90 border-b border-cyan-500/20 backdrop-blur-md px-4 sm:px-8 py-3.5 flex items-center justify-between gap-8">
-        {/* Zone 1: Single text element wordmark */}
+    <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col justify-between selection:bg-cyan-500 selection:text-white w-full max-w-full overflow-x-hidden">
+      {/* ================= Top Bar ================= */}
+      <header className="sticky top-0 z-40 bg-slate-900/90 border-b border-cyan-500/20 backdrop-blur-md px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between gap-4 max-w-full overflow-x-hidden">
+        {/* Wordmark */}
         <div className="flex items-center gap-3 shrink-0">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center font-black text-white shadow-md shadow-cyan-600/30">
             ف
@@ -354,7 +511,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Zone 2: Navigation Links (single line, no wrapping) */}
+        {/* Navigation Links */}
         <nav className="hidden lg:flex items-center gap-5 text-xs font-bold text-slate-300">
           <button
             onClick={() => {
@@ -426,6 +583,21 @@ export default function App() {
             تصوير السبورة
           </button>
 
+          <button
+            onClick={() => {
+              sound.playClick();
+              setActiveSection('rewards');
+            }}
+            className={`whitespace-nowrap shrink-0 transition-colors py-1 flex items-center gap-1.5 ${
+              activeSection === 'rewards'
+                ? 'text-amber-300 border-b-2 border-amber-400 font-black'
+                : 'text-amber-400/90 hover:text-amber-300'
+            }`}
+          >
+            <Trophy className="w-3.5 h-3.5 text-amber-400" />
+            <span>المكافآت (100 نجمة) 👑</span>
+          </button>
+
           {isTeacher && (
             <button
               onClick={() => {
@@ -438,13 +610,28 @@ export default function App() {
                   : 'text-amber-400/80 hover:text-amber-300'
               }`}
             >
-              لوحة تحكم المستر
+              لوحة المستر
             </button>
           )}
         </nav>
 
-        {/* Zone 3: Primary Actions (Casio Calculator, Cloud Indicator & User Control) */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        {/* Primary Actions & User Info */}
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+          {/* Student Star Balance Badge (Quick Access to Rewards) */}
+          {!isTeacher && (
+            <button
+              onClick={() => {
+                sound.playClick();
+                setActiveSection('rewards');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/70 hover:bg-amber-900/80 border border-amber-500/40 rounded-xl text-xs font-bold text-amber-300 transition-all shadow-sm"
+              title="رصيد نجومك نحو الـ 100 نجمة والتكريم مع المستر"
+            >
+              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+              <span>{currentStudentStars} ⭐</span>
+            </button>
+          )}
+
           {/* Cloud Sync Status Indicator */}
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
@@ -452,18 +639,14 @@ export default function App() {
                 ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300'
                 : 'bg-cyan-950/70 border-cyan-500/40 text-cyan-300'
             }`}
-            title={
-              isCloudConnected
-                ? 'متصل بالسحابة · البيانات والامتحانات متزامنة مباشرة بين أجهزة المستر والطلاب'
-                : 'جاري الاتصال السحابي...'
-            }
+            title="متصل بالسحابة · متزامن مباشرة بين أجهزة المستر والطلاب"
           >
             <span
               className={`w-2 h-2 rounded-full ${
                 isCloudConnected ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400'
               }`}
-            ></span>
-            <span className="hidden sm:inline">
+            />
+            <span className="hidden md:inline">
               {isCloudConnected ? 'سحابة متصلة ⚡' : 'مزامنة...'}
             </span>
           </div>
@@ -474,8 +657,8 @@ export default function App() {
               sound.playClick();
               setIsCalculatorOpen(true);
             }}
-            className="px-3 py-1.5 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
-            title="آلة حاسبة كاسيو FX-991EX الذكية"
+            className="px-2.5 sm:px-3 py-1.5 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+            title="آلة كاسيو FX-991EX الذكية"
           >
             <Calculator className="w-4 h-4 text-cyan-400" />
             <span className="hidden sm:inline">آلة كاسيو</span>
@@ -501,11 +684,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Mobile Nav Tabs Bar */}
-      <div className="lg:hidden bg-slate-900/90 border-b border-slate-800 px-3 py-2 flex items-center gap-2 overflow-x-auto">
+      {/* Mobile Nav Tabs Bar (Scrollable with no horizontal page stretch) */}
+      <div className="lg:hidden bg-slate-900/90 border-b border-slate-800 px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar max-w-full">
         <button
           onClick={() => setActiveSection('exams')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 ${
             activeSection === 'exams' ? 'bg-cyan-600 text-white' : 'text-slate-400 bg-slate-800'
           }`}
         >
@@ -513,7 +696,7 @@ export default function App() {
         </button>
         <button
           onClick={() => setActiveSection('homework')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 ${
             activeSection === 'homework' ? 'bg-cyan-600 text-white' : 'text-slate-400 bg-slate-800'
           }`}
         >
@@ -521,7 +704,7 @@ export default function App() {
         </button>
         <button
           onClick={() => setActiveSection('pdf')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 ${
             activeSection === 'pdf' ? 'bg-cyan-600 text-white' : 'text-slate-400 bg-slate-800'
           }`}
         >
@@ -529,7 +712,7 @@ export default function App() {
         </button>
         <button
           onClick={() => setActiveSection('engineers')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 ${
             activeSection === 'engineers' ? 'bg-amber-600 text-white' : 'text-slate-400 bg-slate-800'
           }`}
         >
@@ -537,16 +720,24 @@ export default function App() {
         </button>
         <button
           onClick={() => setActiveSection('board')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 ${
             activeSection === 'board' ? 'bg-cyan-600 text-white' : 'text-slate-400 bg-slate-800'
           }`}
         >
           السبورة
         </button>
+        <button
+          onClick={() => setActiveSection('rewards')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 ${
+            activeSection === 'rewards' ? 'bg-amber-500 text-slate-950 font-black' : 'text-amber-400 bg-slate-800'
+          }`}
+        >
+          المكافآت (100 ⭐)
+        </button>
         {isTeacher && (
           <button
             onClick={() => setActiveSection('teacher')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap shrink-0 ${
               activeSection === 'teacher' ? 'bg-amber-600 text-white' : 'text-amber-400 bg-slate-800'
             }`}
           >
@@ -556,7 +747,7 @@ export default function App() {
       </div>
 
       {/* Main Container */}
-      <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1">
+      <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 overflow-x-hidden">
         {/* User Identity & Grade Ribbon */}
         <div className="mb-6 p-4 bg-slate-900/60 border border-slate-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -567,6 +758,11 @@ export default function App() {
               <div className="text-xs text-slate-400">
                 {isTeacher ? 'المعلم المشرف' : 'الطالب المسجل'}:
                 <span className="text-white font-bold mr-1">{currentUser.name}</span>
+                {!isTeacher && (
+                  <span className="mr-2 text-amber-400 font-bold bg-amber-950/60 px-2 py-0.5 rounded-lg border border-amber-500/30">
+                    {currentStudentStars} نجمة ⭐
+                  </span>
+                )}
               </div>
               <div className="text-xs font-semibold text-cyan-400">
                 {gradeLabels[activeGrade]}
@@ -598,7 +794,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Announcements Bar if any urgent */}
+        {/* Urgent Announcements */}
         {data.announcements.length > 0 && (
           <div className="mb-6 space-y-2">
             {data.announcements.slice(0, 1).map((ann) => (
@@ -617,7 +813,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Section View Switching */}
+        {/* Section Switching */}
         {activeSection === 'exams' && (
           <ExamsSection
             exams={data.exams}
@@ -654,8 +850,12 @@ export default function App() {
         {activeSection === 'engineers' && (
           <EngineersSection
             problems={data.engineerProblems}
+            submissions={data.engineerSubmissions || []}
             grade={activeGrade}
+            studentName={currentUser.name}
+            studentPhone={currentUser.role === 'student' ? currentUser.phone : undefined}
             isTeacher={isTeacher}
+            onSubmitSolution={handleSubmitEngineerSolution}
             onAddProblem={handleAddEngineerProblem}
             onDeleteProblem={handleDeleteEngineerProblem}
             onOpenCalculator={() => setIsCalculatorOpen(true)}
@@ -672,6 +872,17 @@ export default function App() {
           />
         )}
 
+        {activeSection === 'rewards' && (
+          <RewardsSection
+            currentStudentName={currentUser.name}
+            studentStars={currentStudentStars}
+            grade={activeGrade}
+            studentsList={data.students || []}
+            isTeacher={isTeacher}
+            onAwardBonusStars={handleAwardBonusStars}
+          />
+        )}
+
         {activeSection === 'teacher' && isTeacher && (
           <TeacherDashboard
             data={data}
@@ -680,6 +891,10 @@ export default function App() {
             onAddAnnouncement={handleAddAnnouncement}
             onDeleteSubmission={handleDeleteSubmission}
             onGradeSubmission={handleGradeSubmission}
+            onAllowRetakeExam={handleAllowRetakeExam}
+            onGradeEngineerSubmission={handleGradeEngineerSubmission}
+            onAwardBonusStars={handleAwardBonusStars}
+            onDeleteStudent={handleDeleteStudent}
           />
         )}
       </main>
@@ -698,7 +913,7 @@ export default function App() {
         defaultStudentName={currentUser?.name}
       />
 
-      {/* Developer luxury footer */}
+      {/* Developer Luxury Footer */}
       <DeveloperFooter onOpenComplaints={() => setIsComplaintsOpen(true)} />
     </div>
   );

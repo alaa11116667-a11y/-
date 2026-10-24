@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { EngineerProblem, GradeLevel } from '../types';
+import { EngineerProblem, GradeLevel, EngineerSubmission } from '../types';
 import { sound } from '../utils/audio';
 import {
   Wrench,
@@ -15,14 +15,24 @@ import {
   ChevronUp,
   X,
   Target,
-  Upload
+  Upload,
+  Send,
+  FileCheck,
+  Clock,
+  Sparkles,
+  Camera
 } from 'lucide-react';
 import { ENGINEER_BANNER } from '../data/initialData';
+import { compressImageFile } from '../utils/imageCompressor';
 
 interface EngineersSectionProps {
   problems: EngineerProblem[];
+  submissions: EngineerSubmission[];
   grade: GradeLevel;
+  studentName: string;
+  studentPhone?: string;
   isTeacher: boolean;
+  onSubmitSolution: (submission: Omit<EngineerSubmission, 'id' | 'submittedAt'>) => void;
   onAddProblem?: (prob: Omit<EngineerProblem, 'id'>) => void;
   onDeleteProblem?: (id: string) => void;
   onOpenCalculator: () => void;
@@ -30,16 +40,26 @@ interface EngineersSectionProps {
 
 export const EngineersSection: React.FC<EngineersSectionProps> = ({
   problems,
+  submissions,
   grade,
+  studentName,
+  studentPhone,
   isTeacher,
+  onSubmitSolution,
   onAddProblem,
   onDeleteProblem,
   onOpenCalculator
 }) => {
   const [activeHints, setActiveHints] = useState<Record<string, number>>({});
   const [showSolution, setShowSolution] = useState<Record<string, boolean>>({});
+  
+  // Student submission form states per problem
   const [userInputs, setUserInputs] = useState<Record<string, string>>({});
-  const [verificationFeedback, setVerificationFeedback] = useState<Record<string, { status: 'correct' | 'wrong'; msg: string }>>({});
+  const [writtenSteps, setWrittenSteps] = useState<Record<string, string>>({});
+  const [stepImages, setStepImages] = useState<Record<string, string>>({});
+  const [stepImageNames, setStepImageNames] = useState<Record<string, string>>({});
+  const [submittingProblemId, setSubmittingProblemId] = useState<string | null>(null);
+
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
 
   // Teacher new problem form
@@ -55,6 +75,7 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
   const [diagramFileName, setDiagramFileName] = useState('');
 
   const diagramInputRef = React.useRef<HTMLInputElement>(null);
+  const solutionPhotoInputRef = React.useRef<HTMLInputElement>(null);
 
   const gradeProblems = problems.filter((p) => p.grade === grade);
 
@@ -62,14 +83,27 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       setDiagramFileName(file.name);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setDiagramUrl(event.target.result as string);
+      compressImageFile(file)
+        .then((compressed) => {
+          setDiagramUrl(compressed);
           sound.playSuccess();
-        }
-      };
-      reader.readAsDataURL(file);
+        })
+        .catch((err) => {
+          console.error('Diagram compression error:', err);
+        });
+    }
+  };
+
+  const handleStudentStepPhoto = (problemId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setStepImageNames((p) => ({ ...p, [problemId]: file.name }));
+      compressImageFile(file)
+        .then((compressed) => {
+          setStepImages((p) => ({ ...p, [problemId]: compressed }));
+          sound.playSuccess();
+        })
+        .catch((err) => console.error(err));
     }
   };
 
@@ -86,41 +120,32 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
     setShowSolution((prev) => ({ ...prev, [problemId]: !prev[problemId] }));
   };
 
-  const checkAnswer = (problemId: string, correctAnswer: string) => {
-    const input = (userInputs[problemId] || '').trim();
-    if (!input) return;
+  const handleSubmitSolutionToTeacher = (problem: EngineerProblem) => {
+    const answer = (userInputs[problem.id] || '').trim();
+    const steps = (writtenSteps[problem.id] || '').trim();
+    const photo = stepImages[problem.id];
 
-    // Normalizing numbers: remove units and spaces
-    const cleanInput = input.replace(/[^0-9.]/g, '');
-    const cleanCorrect = correctAnswer.replace(/[^0-9.]/g, '');
-
-    const numInput = parseFloat(cleanInput);
-    const numCorrect = parseFloat(cleanCorrect);
-
-    const isMatch =
-      !isNaN(numInput) &&
-      !isNaN(numCorrect) &&
-      Math.abs(numInput - numCorrect) / (numCorrect || 1) < 0.05; // 5% tolerance
-
-    if (isMatch || input.toLowerCase() === correctAnswer.toLowerCase()) {
-      sound.playSuccess();
-      setVerificationFeedback((prev) => ({
-        ...prev,
-        [problemId]: {
-          status: 'correct',
-          msg: '🎉 إجابة عبقرية صحيحة! تفكير هندسي رفيع المستوى يليق بأبطال الفدائيين.'
-        }
-      }));
-    } else {
+    if (!answer && !steps && !photo) {
       sound.playWarning();
-      setVerificationFeedback((prev) => ({
-        ...prev,
-        [problemId]: {
-          status: 'wrong',
-          msg: 'الإجابة غير مطابقة! راجع الحسابات بدقة عبر آلة كاسيو أو افتح التلميحات المساعدة.'
-        }
-      }));
+      alert('يرجى كتابة الناتج أو توضيح خطوات حلك أو إرفاق صورة الحل قبل التسليم.');
+      return;
     }
+
+    sound.playSuccess();
+    onSubmitSolution({
+      problemId: problem.id,
+      problemTitle: problem.title,
+      studentName,
+      studentPhone,
+      grade,
+      numericalAnswer: answer || 'انظر خطوات الحل المرفقة',
+      writtenSteps: steps || 'مرفق صورة ورقة الحل بالأسفل',
+      stepsImageUrl: photo || undefined,
+      status: 'pending',
+      starsAwarded: 0
+    });
+
+    setSubmittingProblemId(null);
   };
 
   const handleCreateProblem = (e: React.FormEvent) => {
@@ -140,7 +165,8 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
       hints: [hint1, hint2].filter(Boolean),
       numericalAnswer,
       solutionSteps: solutionStepsText.split('\n').filter(Boolean),
-      engineerInsight: engineerInsight || 'تطبيق هندسي عملي يربط بين النظرية الفيزيائية والأنظمة الهندسية الحديثة.'
+      engineerInsight:
+        engineerInsight || 'تطبيق هندسي عملي يربط بين النظرية الفيزيائية والأنظمة الهندسية الحديثة.'
     });
 
     setTitle('');
@@ -164,14 +190,14 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
           <div className="flex items-center gap-2">
             <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
               <Cpu className="w-6 h-6 text-amber-400" />
-              <span>قسم المهندسين 💪 (أصعب المسائل)</span>
+              <span>قسم المهندسين 💪 (مسائل العباقرة للتصحيح)</span>
             </h2>
             <span className="bg-amber-950/80 text-amber-300 border border-amber-500/40 px-2.5 py-0.5 rounded-full text-xs font-bold">
-              مستويات عليا
+              تصحح بيد المستر ✍️
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            بنك التحديات والمسائل الأولمبية التي تبني العقلية الهندسية الفذة لطلاب المهندس محمد علاء
+            حل المسألة وأرسل خطواتك للمستر محمد علاء، ليصححها بنفسه ويمنحك حتى 20 نجمة ⭐ للوصول لهدف الـ 100 نجمة والتكريم!
           </p>
         </div>
 
@@ -184,7 +210,7 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
           >
             <Zap className="w-4 h-4 text-cyan-400" />
-            <span>فتح آلة كاسيو للحساب</span>
+            <span>آلة كاسيو FX-991EX</span>
           </button>
 
           {isTeacher && (
@@ -196,7 +222,7 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
               className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/30 transition-all flex items-center gap-1.5"
             >
               <Plus className="w-4 h-4" />
-              <span>إضافة مسألة مهندسين</span>
+              <span>إضافة مسألة جديدة</span>
             </button>
           )}
         </div>
@@ -213,7 +239,11 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
           {gradeProblems.map((prob, idx) => {
             const currentHintsCount = activeHints[prob.id] || 0;
             const isSolOpen = showSolution[prob.id];
-            const feedback = verificationFeedback[prob.id];
+
+            // Look up if this student already submitted a solution for this problem
+            const existingSub = submissions.find(
+              (s) => s.problemId === prob.id && s.studentName === studentName
+            );
 
             return (
               <div
@@ -233,8 +263,8 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
                   </div>
 
                   <div className="flex items-center gap-3">
-                    {/* 5 Stars Rating */}
-                    <div className="flex items-center gap-0.5 text-amber-400" title="صعوبة قصوى">
+                    {/* Difficulty Badge */}
+                    <div className="flex items-center gap-0.5 text-amber-400" title="مستوى عليا 5 نجوم">
                       {[...Array(5)].map((_, i) => (
                         <Star key={i} className="w-3.5 h-3.5 fill-amber-400" />
                       ))}
@@ -270,54 +300,120 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
                   </div>
                 )}
 
-                {/* Answer Verifier Input Deck */}
-                <div className="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60 mb-6">
-                  <span className="text-xs font-bold text-white block mb-2 flex items-center gap-1.5">
-                    <Target className="w-4 h-4 text-cyan-400" />
-                    <span>تحقق من الناتج النهائي الذي توصلت إليه:</span>
-                  </span>
+                {/* Submission Deck / Feedback from Teacher */}
+                {existingSub ? (
+                  <div className="p-5 rounded-2xl border mb-6 bg-slate-950/80 border-cyan-500/30 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                        <FileCheck className="w-4 h-4 text-cyan-400" />
+                        <span>حالة تسليم إجابتك للمستر محمد علاء:</span>
+                      </span>
 
-                  <div className="flex flex-col sm:flex-row items-center gap-3">
-                    <div className="relative flex-1 w-full">
-                      <input
-                        type="text"
-                        value={userInputs[prob.id] || ''}
+                      {existingSub.status === 'graded' ? (
+                        <span className="px-3 py-1 rounded-xl bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>تم التصحيح والاعتماد (+{existingSub.starsAwarded} ⭐)</span>
+                        </span>
+                      ) : (
+                        <span className="px-3 py-1 rounded-xl bg-amber-950/80 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          <span>قيد مراجعة وتصحيح المستر ⏳</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">الناتج المسلم:</span>
+                        <span className="font-mono font-bold text-white">{existingSub.numericalAnswer}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block mb-0.5">وقت التسليم:</span>
+                        <span className="font-mono text-slate-300">{existingSub.submittedAt}</span>
+                      </div>
+                    </div>
+
+                    {existingSub.teacherFeedback && (
+                      <div className="p-3.5 bg-amber-950/40 rounded-xl border border-amber-500/30 text-xs text-amber-200">
+                        <span className="font-bold block text-amber-300 mb-1">
+                          ✍️ تقييم وملاحظات المستر محمد علاء:
+                        </span>
+                        {existingSub.teacherFeedback}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Student Submit Solution Form */
+                  <div className="p-5 bg-slate-800/60 rounded-2xl border border-slate-700/60 mb-6 space-y-3">
+                    <span className="text-xs font-bold text-white block flex items-center gap-1.5">
+                      <Target className="w-4 h-4 text-amber-400" />
+                      <span>سلم حلك للمستر محمد علاء (تصحح يدوياً لمنح النجوم ⭐):</span>
+                    </span>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                          الناتج النهائي المحسوب
+                        </label>
+                        <input
+                          type="text"
+                          value={userInputs[prob.id] || ''}
+                          onChange={(e) =>
+                            setUserInputs((p) => ({ ...p, [prob.id]: e.target.value }))
+                          }
+                          placeholder="مثال: 10 Ω أو 2.5 A..."
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white font-mono placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                          إرفاق صورة لورقة الحل (اختياري)
+                        </label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleStudentStepPhoto(prob.id, e)}
+                          className="hidden"
+                          id={`photo-${prob.id}`}
+                        />
+                        <label
+                          htmlFor={`photo-${prob.id}`}
+                          className="w-full py-2 px-3 bg-slate-900 border border-dashed border-amber-500/40 hover:border-amber-400 rounded-xl text-xs text-amber-300 flex items-center justify-center gap-1.5 cursor-pointer truncate"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>{stepImageNames[prob.id] ? `تم اختيار: ${stepImageNames[prob.id]}` : 'تصوير الحل بالموبايل'}</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        خطوات وتفسير الحل الرياضي والفيزيائي
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={writtenSteps[prob.id] || ''}
                         onChange={(e) =>
-                          setUserInputs((p) => ({ ...p, [prob.id]: e.target.value }))
+                          setWrittenSteps((p) => ({ ...p, [prob.id]: e.target.value }))
                         }
-                        placeholder="أدخل القيمة المحسوبة (مثال: 1.11 أو 10)..."
-                        className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 font-mono"
+                        placeholder="اكتب خطوات الحل أو فرض التيارات أو القانون المستخدم..."
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
                       />
                     </div>
 
                     <button
-                      onClick={() => checkAnswer(prob.id, prob.numericalAnswer)}
-                      className="w-full sm:w-auto px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-md shadow-cyan-600/30 transition-all whitespace-nowrap"
+                      onClick={() => handleSubmitSolutionToTeacher(prob)}
+                      className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 text-white rounded-xl text-xs font-bold shadow-md shadow-amber-600/30 flex items-center justify-center gap-2 transition-all"
                     >
-                      تأكيد الحل
+                      <Send className="w-4 h-4" />
+                      <span>إرسال الحل للمستر محمد علاء للتصحيح ومنح النجوم</span>
                     </button>
                   </div>
+                )}
 
-                  {feedback && (
-                    <div
-                      className={`mt-3 p-3 rounded-xl text-xs font-medium flex items-center gap-2 ${
-                        feedback.status === 'correct'
-                          ? 'bg-emerald-950/80 border border-emerald-500/50 text-emerald-300'
-                          : 'bg-rose-950/80 border border-rose-500/50 text-rose-300'
-                      }`}
-                    >
-                      {feedback.status === 'correct' ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      ) : (
-                        <HelpCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                      )}
-                      <span>{feedback.msg}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Progressive Hints Section */}
-                <div className="space-y-3 mb-6">
+                {/* Progressive Hints & Teacher Solution Reveal */}
+                <div className="space-y-3">
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => toggleHint(prob.id, prob.hints.length)}
@@ -370,7 +466,10 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
 
                       <div className="space-y-1.5 text-slate-300">
                         {prob.solutionSteps.map((step, sIdx) => (
-                          <div key={sIdx} className="p-2 bg-slate-900/60 rounded-lg border border-slate-800/80 font-mono text-[11px]">
+                          <div
+                            key={sIdx}
+                            className="p-2 bg-slate-900/60 rounded-lg border border-slate-800/80 font-mono text-[11px]"
+                          >
                             {step}
                           </div>
                         ))}
@@ -460,7 +559,7 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1 flex items-center justify-between">
                   <span>صورة أو رسمة المسألة الهندسية (رفع من جهازك)</span>
-                  <span className="text-[11px] text-amber-400 font-normal">اختياري - من الموبايل أو الكمبيوتر</span>
+                  <span className="text-[11px] text-amber-400 font-normal">اختياري</span>
                 </label>
                 <input
                   type="file"
@@ -475,7 +574,7 @@ export const EngineersSection: React.FC<EngineersSectionProps> = ({
                   className="w-full py-2.5 px-3 rounded-xl border border-dashed border-amber-500/40 bg-slate-800/80 hover:bg-slate-800 text-xs font-bold text-amber-300 flex items-center justify-center gap-2 transition-all cursor-pointer"
                 >
                   <Upload className="w-4 h-4 text-amber-400" />
-                  <span>{diagramFileName ? `تم اختيار: ${diagramFileName}` : 'اختر صورة المخطط أو الدائرة من جهازك'}</span>
+                  <span>{diagramFileName ? `تم اختيار: ${diagramFileName}` : 'اختر صورة المخطط من جهازك'}</span>
                 </button>
                 {diagramUrl && (
                   <div className="mt-2 relative rounded-xl overflow-hidden border border-amber-500/30 max-h-32 bg-slate-950">
