@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128;
+    }
+
+    // Exams
+    match /exams/{examId} {
+      allow read, write: if isValidId(examId);
+    }
+
+    // Homework sheets
+    match /homeworks/{homeworkId} {
+      allow read, write: if isValidId(homeworkId);
+    }
+
+    // PDF summaries and formula books
+    match /pdfs/{pdfId} {
+      allow read, write: if isValidId(pdfId);
+    }
+
+    // Engineers problems
+    match /engineer_problems/{problemId} {
+      allow read, write: if isValidId(problemId);
+    }
+
+    // Blackboard captures
+    match /board_captures/{boardId} {
+      allow read, write: if isValidId(boardId);
+    }
+
+    // Course announcements
+    match /announcements/{announcementId} {
+      allow read, write: if isValidId(announcementId);
+    }
+
+    // Student Exam Submissions & Teacher Grading
+    match /submissions/{submissionId} {
+      allow read, write: if isValidId(submissionId);
+    }
+
+    // Student Complaints & Feedback
+    match /complaints/{complaintId} {
+      allow read, write: if isValidId(complaintId);
+    }
+
+    // Connection test document
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+  }
+}
